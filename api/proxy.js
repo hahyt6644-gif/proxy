@@ -1,5 +1,4 @@
-// api/download.js
-const DEFAULT_COOKIE = "ndus=Y2YqaCTteHuiU3Ud_MYU7vHoVW4DNBi0MPmg_1tQ"; // fallback
+const DEFAULT_COOKIE = "ndus=Y2YqaCTteHuiU3Ud_MYU7vHoVW4DNBi0MPmg_1tQ" // Fallback cookie
 
 function getDLHeaders(cookie) {
   return {
@@ -21,86 +20,96 @@ const CORS_HEADERS = {
   "Access-Control-Expose-Headers": "Content-Length,Content-Range,Content-Disposition"
 };
 
-export default async function handler(req, res) {
-  // Handle OPTIONS (CORS preflight)
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200, CORS_HEADERS);
-    res.end();
-    return;
+exports.handler = async (event, context) => {
+  // Handle CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: ''
+    };
   }
 
-  if (req.method !== 'GET') {
-    res.writeHead(405, { "Content-Type": "application/json", ...CORS_HEADERS });
-    res.end(JSON.stringify({ error: "Method not allowed. Use GET request." }));
-    return;
+  // Only handle GET requests
+  if (event.httpMethod !== "GET") {
+    return {
+      statusCode: 405,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      body: JSON.stringify({ error: "Method not allowed. Use GET request." })
+    };
   }
 
-  const { url: downloadUrl, filename, cookie } = req.query || {};
-
+  const { url: downloadUrl, filename: fileName, cookie } = event.queryStringParameters || {};
+  
   if (!downloadUrl) {
-    res.writeHead(400, { "Content-Type": "application/json", ...CORS_HEADERS });
-    res.end(JSON.stringify({ error: "Missing required parameter: url" }));
-    return;
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      body: JSON.stringify({ error: "Missing required parameter: url" })
+    };
   }
 
   try {
     const headers = getDLHeaders(cookie);
-    if (req.headers.range) headers.Range = req.headers.range;
+    
+    // Handle range requests for video streaming/partial downloads
+    const rangeHeader = event.headers.range || event.headers.Range;
+    if (rangeHeader) {
+      headers.Range = rangeHeader;
+    }
 
-    const response = await fetch(decodeURIComponent(downloadUrl), {
+    const response = await fetch(downloadUrl, {
       headers,
       redirect: 'follow',
     });
 
-    // Handle bad upstream responses
     if (!response.ok && response.status !== 206) {
-      res.writeHead(502, { "Content-Type": "application/json", ...CORS_HEADERS });
-      res.end(JSON.stringify({ error: "Download service temporarily unavailable." }));
-      return;
+      console.error(`Failed to fetch download: ${response.status}`);
+      return {
+        statusCode: 502,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        body: JSON.stringify({ error: "Download service temporarily unavailable." })
+      };
     }
 
-    // Prepare headers
+    // Prepare response headers
     const responseHeaders = {
       ...CORS_HEADERS,
-      "Cache-Control": "public, max-age=3600",
-      "Content-Type": response.headers.get("Content-Type") || "application/octet-stream",
+      'Cache-Control': 'public, max-age=3600',
+      'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
     };
 
-    if (filename) {
-      responseHeaders["Content-Disposition"] = `inline; filename="${encodeURIComponent(filename)}"`;
+    // Set filename for download
+    if (fileName) {
+      responseHeaders['Content-Disposition'] = `inline; filename="${encodeURIComponent(fileName)}"`;
     }
 
-    if (response.headers.get("Content-Range")) {
-      responseHeaders["Content-Range"] = response.headers.get("Content-Range");
-      responseHeaders["Accept-Ranges"] = "bytes";
+    // Handle range responses
+    if (response.headers.get('Content-Range')) {
+      responseHeaders['Content-Range'] = response.headers.get('Content-Range');
+      responseHeaders['Accept-Ranges'] = 'bytes';
+    }
+    
+    if (response.headers.get('Content-Length')) {
+      responseHeaders['Content-Length'] = response.headers.get('Content-Length');
     }
 
-    if (response.headers.get("Content-Length")) {
-      responseHeaders["Content-Length"] = response.headers.get("Content-Length");
-    }
+    // Get response body
+    const buffer = await response.arrayBuffer();
 
-    res.writeHead(response.status, responseHeaders);
-
-    // Stream file directly to response
-    const reader = response.body.getReader();
-    async function stream() {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(Buffer.from(value));
-        }
-      } catch (err) {
-        console.error("Streaming error:", err);
-      } finally {
-        res.end();
-      }
-    }
-    stream();
+    return {
+      statusCode: response.status,
+      headers: responseHeaders,
+      body: Buffer.from(buffer).toString('base64'),
+      isBase64Encoded: true
+    };
 
   } catch (error) {
-    console.error("Proxy error:", error);
-    res.writeHead(500, { "Content-Type": "application/json", ...CORS_HEADERS });
-    res.end(JSON.stringify({ error: "Download service error occurred." }));
+    console.error("Proxy error:", error.message);
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      body: JSON.stringify({ error: "Download service error occurred." })
+    };
   }
-}
+};
