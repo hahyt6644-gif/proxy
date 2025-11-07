@@ -1,0 +1,10 @@
+{
+  "name": "terabox-proxy-vercel",
+  "version": "1.0.0",
+  "description": "A Vercel-hosted proxy that mimics terabox.ashlynn.workers.dev",
+  "main": "api/proxy.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {}
+}
