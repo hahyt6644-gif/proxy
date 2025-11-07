@@ -1,63 +1,106 @@
-// api/proxy.js
-// TeraBox Proxy clone for Vercel
-// ---------------------------------------------------------
-// Usage example:
-// https://your-app.vercel.app/api/proxy?url=https%3A%2F%2Fd.1024terabox.com%2Ffile%2F...&file_name=video.mov&cookie=ndus%3Dxyz
-// ---------------------------------------------------------
+// api/download.js
+const DEFAULT_COOKIE = "ndus=Y2YqaCTteHuiU3Ud_MYU7vHoVW4DNBi0MPmg_1tQ"; // fallback
+
+function getDLHeaders(cookie) {
+  return {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Referer": "https://1024terabox.com/",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Cookie": cookie || DEFAULT_COOKIE,
+  };
+}
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type,Range",
+  "Access-Control-Expose-Headers": "Content-Length,Content-Range,Content-Disposition"
+};
 
 export default async function handler(req, res) {
+  // Handle OPTIONS (CORS preflight)
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200, CORS_HEADERS);
+    res.end();
+    return;
+  }
+
+  if (req.method !== 'GET') {
+    res.writeHead(405, { "Content-Type": "application/json", ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: "Method not allowed. Use GET request." }));
+    return;
+  }
+
+  const { url: downloadUrl, filename, cookie } = req.query || {};
+
+  if (!downloadUrl) {
+    res.writeHead(400, { "Content-Type": "application/json", ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: "Missing required parameter: url" }));
+    return;
+  }
+
   try {
-    const { url, file_name, cookie } = req.query;
+    const headers = getDLHeaders(cookie);
+    if (req.headers.range) headers.Range = req.headers.range;
 
-    if (!url) {
-      return res.status(400).json({ error: 'Missing ?url=' });
-    }
-
-    // Basic safety: only http/https
-    if (!/^https?:\/\//i.test(url)) {
-      return res.status(400).json({ error: 'Invalid URL' });
-    }
-
-    // Build headers for upstream request
-    const headers = {
-      'User-Agent': 'Vercel-TeraBox-Proxy/1.0',
-    };
-    if (cookie) headers['Cookie'] = decodeURIComponent(cookie);
-
-    // Fetch target
-    const targetUrl = decodeURIComponent(url);
-    const upstream = await fetch(targetUrl, {
+    const response = await fetch(decodeURIComponent(downloadUrl), {
       headers,
       redirect: 'follow',
     });
 
-    // Handle upstream errors
-    if (!upstream.ok) {
-      return res
-        .status(upstream.status)
-        .json({ error: `Upstream error: ${upstream.statusText}` });
+    // Handle bad upstream responses
+    if (!response.ok && response.status !== 206) {
+      res.writeHead(502, { "Content-Type": "application/json", ...CORS_HEADERS });
+      res.end(JSON.stringify({ error: "Download service temporarily unavailable." }));
+      return;
     }
 
-    // Read body
-    const arrayBuffer = await upstream.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Prepare headers
+    const responseHeaders = {
+      ...CORS_HEADERS,
+      "Cache-Control": "public, max-age=3600",
+      "Content-Type": response.headers.get("Content-Type") || "application/octet-stream",
+    };
 
-    // Prepare response headers
-    const contentType =
-      upstream.headers.get('content-type') || 'application/octet-stream';
-    const filename = file_name ? decodeURIComponent(file_name) : 'file';
-    const contentDisposition = `attachment; filename="${filename}"`;
+    if (filename) {
+      responseHeaders["Content-Disposition"] = `inline; filename="${encodeURIComponent(filename)}"`;
+    }
 
-    // Set headers
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', contentDisposition);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    if (response.headers.get("Content-Range")) {
+      responseHeaders["Content-Range"] = response.headers.get("Content-Range");
+      responseHeaders["Accept-Ranges"] = "bytes";
+    }
 
-    res.status(upstream.status);
-    res.end(buffer);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
+    if (response.headers.get("Content-Length")) {
+      responseHeaders["Content-Length"] = response.headers.get("Content-Length");
+    }
+
+    res.writeHead(response.status, responseHeaders);
+
+    // Stream file directly to response
+    const reader = response.body.getReader();
+    async function stream() {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+      } catch (err) {
+        console.error("Streaming error:", err);
+      } finally {
+        res.end();
+      }
+    }
+    stream();
+
+  } catch (error) {
+    console.error("Proxy error:", error);
+    res.writeHead(500, { "Content-Type": "application/json", ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: "Download service error occurred." }));
   }
 }
