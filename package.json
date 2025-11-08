@@ -1,10 +1,12 @@
 {
-  "name": "terabox-proxy-vercel",
+  "name": "eyecon-api",
   "version": "1.0.0",
-  "description": "A Vercel-hosted proxy that mimics terabox.ashlynn.workers.dev",
-  "main": "api/proxy.js",
+  "description": "Eyecon Lookup API Proxy (Developer: @ITZ_ME_545)",
+  "main": "api/api.php",
   "scripts": {
-    "start": "vercel dev"
+    "start": "php -S localhost:3000 -t api"
   },
-  "dependencies": {}
+  "keywords": ["php", "vercel", "api", "eyecon"],
+  "author": "@ITZ_ME_545",
+  "license": "MIT"
 }
