@@ -4,6 +4,6 @@
     { "src": "api/api.php", "use": "@vercel/php" }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/api.php" }
+    { "src": "/(.*)", "dest": "/api/api.php" }
   ]
 }
