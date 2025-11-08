@@ -1,13 +1,9 @@
-
 {
   "version": 2,
-  "functions": {
-    "api/proxy.js": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 60
-    }
-  },
+  "builds": [
+    { "src": "api.php", "use": "@vercel/php" }
+  ],
   "routes": [
-    { "src": "/api/proxy", "dest": "/api/proxy.js" }
+    { "src": "/(.*)", "dest": "/api.php" }
   ]
 }
