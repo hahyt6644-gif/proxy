@@ -56,15 +56,12 @@ if ($http_code !== 200 || !$response) {
     exit;
 }
 
-// Try to decode the original API response
 $data = json_decode($response, true);
 
-// If it’s valid JSON, append credit
 if (is_array($data)) {
     $data['developer'] = '@ITZ_ME_545';
     echo json_encode($data);
 } else {
-    // fallback if API returned raw text
     echo json_encode([
         'raw' => $response,
         'developer' => '@ITZ_ME_545'
